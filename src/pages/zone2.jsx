@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader';
 import { gsap } from 'gsap';
+import {EXRLoader} from "three/examples/jsm/loaders/EXRLoader.js";
+
 
 // Define portal position configuration object
 const PORTAL_CONFIG = {
@@ -24,6 +26,11 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
     const loadingCanvasRef = useRef(null);
     const loadingStartTimeRef = useRef(Date.now());
     const minLoadingTime = 5000; // 5 seconds minimum loading time
+
+    const mixerRef = useRef(null);
+    const clockRef = useRef(new THREE.Clock());
+    const animationActionsRef = useRef([]);
+    const modelRef = useRef(null);
 
     useEffect(() => {
         // Create loading warp tunnel effect identical to portal transition
@@ -165,7 +172,7 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
 
         // Enhanced tone mapping for better HDR results
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.5; // Increased from 1.0 for brighter scene
+        renderer.toneMappingExposure = 0.6; // Increased from 1.0 for brighter scene
         renderer.outputEncoding = THREE.sRGBEncoding;
 
         // Add renderer to DOM
@@ -173,27 +180,37 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
 
         // Enhanced lighting setup
         // Stronger ambient light to prevent dark shadows
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Increased from 0.2
+        const ambientLight = new THREE.AmbientLight(0xffa500, 0.1); // Increased from 0.2
         scene.add(ambientLight);
 
         // Main directional light with shadows
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); // Increased from 0.5
-        directionalLight.position.set(5, 5, 5);
+        const directionalLight = new THREE.DirectionalLight(0xffd500, 3); // Reduced from 1.2
+        directionalLight.position.set(5, 10, 5); // Higher position for more dramatic shadows
         directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 1024;
-        directionalLight.shadow.mapSize.height = 1024;
+
+        // Improved shadow settings for harder shadows
+        directionalLight.shadow.mapSize.width = 2048; // Increased resolution
+        directionalLight.shadow.mapSize.height = 2048;
         directionalLight.shadow.camera.near = 0.5;
-        directionalLight.shadow.camera.far = 30;
-        directionalLight.shadow.camera.left = -10;
-        directionalLight.shadow.camera.right = 10;
-        directionalLight.shadow.camera.top = 10;
-        directionalLight.shadow.camera.bottom = -10;
-        directionalLight.shadow.bias = -0.001;
+        directionalLight.shadow.camera.far = 50; // Increased far plane
+        directionalLight.shadow.camera.left = -15;
+        directionalLight.shadow.camera.right = 15;
+        directionalLight.shadow.camera.top = 15;
+        directionalLight.shadow.camera.bottom = -15;
+        directionalLight.shadow.bias = -0.0005; // Reduced bias for sharper shadows
+        directionalLight.shadow.normalBias = 0.02; // Added normal bias to prevent shadow acne
+        directionalLight.shadow.radius = 0; // Set to 0 for hard shadows (no blurring)
         scene.add(directionalLight);
 
         // Add a secondary fill light from opposite direction
-        const fillLight = new THREE.DirectionalLight(0xffffcc, 0.7);
+        const fillLight = new THREE.DirectionalLight(0xffa500, 0.3); // Reduced from 1.0
         fillLight.position.set(-5, 3, -5);
+        fillLight.castShadow = true;
+        fillLight.shadow.mapSize.width = 1024;
+        fillLight.shadow.mapSize.height = 1024;
+        fillLight.shadow.camera.near = 0.5;
+        fillLight.shadow.camera.far = 30;
+        fillLight.shadow.radius = 0; // Hard shadows
         scene.add(fillLight);
 
         // Add a subtle rim light for depth
@@ -260,11 +277,58 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
         }, 100);
 
         // Load HDRI environment map
-        const rgbeLoader = new RGBELoader(manager);
-        rgbeLoader.setDataType(THREE.FloatType);
-        rgbeLoader.load(
-            hdriPath,
-            (texture) => {
+        function loadEnvironmentMap(path) {
+            const fileExtension = path.split('.').pop().toLowerCase();
+
+            console.log("Loading environment map with extension:", fileExtension);
+
+            if (fileExtension === 'hdr') {
+                // Use RGBELoader for HDR files
+                const rgbeLoader = new RGBELoader(manager);
+                rgbeLoader.setDataType(THREE.FloatType);
+                rgbeLoader.load(
+                    path,
+                    handleLoadedTexture,
+                    onProgress,
+                    (error) => {
+                        console.error('Error loading HDR:', error);
+                        setupFallbackEnvironment();
+                    }
+                );
+            } else if (fileExtension === 'exr') {
+                // Use EXRLoader for EXR files
+                const exrLoader = new EXRLoader(manager);
+                exrLoader.setDataType(THREE.FloatType);
+                exrLoader.load(
+                    path,
+                    handleLoadedTexture,
+                    onProgress,
+                    (error) => {
+                        console.error('Error loading EXR:', error);
+                        setupFallbackEnvironment();
+                    }
+                );
+            } else if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
+                // Use TextureLoader for standard image formats
+                const textureLoader = new THREE.TextureLoader(manager);
+                textureLoader.load(
+                    path,
+                    (texture) => {
+                        texture.mapping = THREE.EquirectangularReflectionMapping;
+                        handleLoadedTexture(texture);
+                    },
+                    onProgress,
+                    (error) => {
+                        console.error('Error loading image:', error);
+                        setupFallbackEnvironment();
+                    }
+                );
+            } else {
+                console.error('Unsupported file format:', fileExtension);
+                setupFallbackEnvironment();
+            }
+
+            function handleLoadedTexture(texture) {
                 const pmremGenerator = new THREE.PMREMGenerator(renderer);
                 pmremGenerator.compileEquirectangularShader();
 
@@ -273,27 +337,67 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
                 // Set the scene's environment map for reflections
                 scene.environment = envMap;
 
-                // Optionally use the HDRI as background too
+                // Use the HDRI as background too
                 scene.background = envMap;
 
-                // Important: dispose of resources to prevent memory leaks
+                // Clean up resources
                 texture.dispose();
                 pmremGenerator.dispose();
+            }
 
-                // Update loading progress
-                setLoadingProgress(prev => Math.max(prev, 50));
-            },
-            (xhr) => {
+            function onProgress(xhr) {
                 if (xhr.lengthComputable) {
-                    const progress = (xhr.loaded / xhr.total) * 50; // 50% of total loading allocated to HDRI
+                    const progress = (xhr.loaded / xhr.total) * 50;
                     setLoadingProgress(progress);
                 }
-            },
-            (error) => {
-                console.error('Error loading HDRI:', error);
-                // Continue with default lighting if HDRI fails
             }
-        );
+        }
+
+// Define the fallback environment function
+        function setupFallbackEnvironment() {
+            console.log("Setting up fallback environment");
+
+            // Set a simple color background
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+
+            // Create a simple environment for reflections
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            pmremGenerator.compileEquirectangularShader();
+
+            // Generate a simple environment map
+            const color = new THREE.Color(0x88CCFF);
+            const intensity = 0.5;
+            const envLight = new THREE.HemisphereLight(color, 0x444444, intensity);
+            scene.add(envLight);
+
+            // Create a simple gradient for reflections
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const context = canvas.getContext('2d');
+
+            // Create gradient
+            const gradient = context.createLinearGradient(0, 0, 0, 512);
+            gradient.addColorStop(0, '#8888ff');
+            gradient.addColorStop(1, '#000033');
+
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 1024, 512);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+
+            const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+            scene.environment = envMap;
+
+            // Don't forget to dispose resources
+            texture.dispose();
+            pmremGenerator.dispose();
+        }
+
+// Then call the loadEnvironmentMap function
+        loadEnvironmentMap(hdriPath);
+
 
         // Load GLB model with the manager
         const loader = new GLTFLoader(manager);
@@ -335,6 +439,37 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
 
                         // Ensure materials update
                         child.material.needsUpdate = true;
+                    }
+                    if (gltf.animations && gltf.animations.length > 0) {
+                        console.log(`Found ${gltf.animations.length} animations`);
+
+                        // Create a fresh animation mixer
+                        mixerRef.current = new THREE.AnimationMixer(model);
+
+                        // Clear any existing actions
+                        animationActionsRef.current = [];
+
+                        // Process all animations
+                        gltf.animations.forEach((clip, index) => {
+                            console.log(`Animation ${index}: ${clip.name} (Duration: ${clip.duration}s)`);
+
+                            // Create action for this animation clip
+                            const action = mixerRef.current.clipAction(clip);
+                            animationActionsRef.current.push(action);
+
+                            // For the first animation, set it up to play by default
+                            if (index === 0) {
+                                action.setLoop(THREE.LoopRepeat);
+                                action.clampWhenFinished = false;
+                                action.play();
+                                console.log('Started playing animation:', clip.name);
+                            }
+                        });
+
+                        // Reset the clock to ensure proper animation timing
+                        clockRef.current.start();
+                    } else {
+                        console.warn('No animations found in the GLB file');
                     }
                 });
 
@@ -413,29 +548,7 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
             emissiveIntensity: 1.0
         });
 
-        for (let i = 0; i < 50; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = 2 + Math.random() * 0.2;
-            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
 
-            // Calculate particle position relative to portal position
-            particle.position.x = Math.cos(angle) * radius + PORTAL_CONFIG.position.x;
-            particle.position.z = Math.sin(angle) * radius + PORTAL_CONFIG.position.z;
-            particle.position.y = (Math.random() - 0.5) * 4 + PORTAL_CONFIG.position.y;
-
-            particle.userData = {
-                angle: angle,
-                radius: radius,
-                speed: 0.01 + Math.random() * 0.02,
-                direction: Math.random() > 0.5 ? 1 : -1,
-                ySpeed: (Math.random() - 0.5) * 0.05,
-                centerX: PORTAL_CONFIG.position.x,
-                centerZ: PORTAL_CONFIG.position.z
-            };
-            portalParticles.add(particle);
-        }
-
-        scene.add(portalParticles);
 
 
         // Mouse controls
@@ -496,33 +609,15 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
                     portalTransition();
                 }
             }
-
-            // Animate portal particles
-            portalParticles.children.forEach(particle => {
-                const data = particle.userData;
-                data.angle += data.speed * data.direction;
-
-                // Use the particle's center coordinates from userData (which match portal position)
-                particle.position.x = Math.cos(data.angle) * data.radius + data.centerX;
-                particle.position.z = Math.sin(data.angle) * data.radius + data.centerZ;
-                particle.position.y += data.ySpeed;
-
-                // Wrap particles vertically relative to portal position
-                const yOffset = 2; // How far particles can travel from portal center
-                if (particle.position.y > PORTAL_CONFIG.position.y + yOffset)
-                    particle.position.y = PORTAL_CONFIG.position.y - yOffset;
-                if (particle.position.y < PORTAL_CONFIG.position.y - yOffset)
-                    particle.position.y = PORTAL_CONFIG.position.y + yOffset;
-
-                // Add pulsing glow effect to particles
-                const pulseTime = Date.now() * 0.001;
-                const pulseValue = 0.7 + Math.sin(pulseTime * 2 + data.angle) * 0.3;
-                particle.material.emissiveIntensity = pulseValue;
-            });
+            // Update animations if mixer exists
+            const delta = clockRef.current.getDelta();
+            if (mixerRef.current) {
+                mixerRef.current.update(delta);
+            }
 
             // Portal glow effect with more dramatic pulsing
             const time = Date.now() * 0.001;
-            portal.material.opacity = 0.5 + Math.sin(time * 2) * 0.2;
+            portal.material.opacity = 0;
             portal.material.emissiveIntensity = 0.5 + Math.sin(time * 3) * 0.3;
 
             // Make portal light pulse in intensity
@@ -746,6 +841,36 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
                         height: '100%'
                     }}
                 />
+                <button
+                    onClick={() => navigate('/')}
+                    style={{
+                        position: 'fixed',
+                        top: '20px',
+                        right: '20px',
+                        zIndex: 1000,
+                        padding: '10px 20px',
+                        background: 'linear-gradient(145deg, #00cc99, #0066ff, #00cc99)',
+                        backgroundSize: '200% 200%',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '5px',
+                        cursor: 'pointer',
+                        fontSize: '16px',
+                        fontFamily: 'Arial, sans-serif',
+                        transition: 'all 0.3s ease',
+                        opacity: portalEntered ? 0 : 1,
+                        pointerEvents: portalEntered ? 'none' : 'auto',
+                        textShadow: '0 0 8px rgba(0, 255, 153, 0.3)',
+                        boxShadow: '0 0 15px rgba(0, 255, 153, 0.3)',
+                        ':hover': {
+                            background: 'linear-gradient(145deg, #00ff99, #00cc77, #00ff99)',
+                            transform: 'scale(1.05)',
+                            boxShadow: '0 0 25px rgba(0, 255, 153, 0.5)'
+                        }
+                    }}
+                >
+                    Exit to Home
+                </button>
 
                 {/* Optional loading text overlay */}
                 <div style={{
@@ -759,11 +884,11 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
                     fontSize: '16px',
                     zIndex: 1001
                 }}>
-                    {Math.floor(loadingProgress)}%
+                    {Math.floor(loadingProgress)}
                 </div>
             </div>
 
-            <div ref={mountRef} style={{ width: '100%', height: '100vh' }} />
+            <div ref={mountRef} style={{width: '100%', height: '100vh'}}/>
         </>
     );
 };
