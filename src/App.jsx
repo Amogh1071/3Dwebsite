@@ -30,7 +30,7 @@ const App = () => {
                 <Zone2 glbPath="/src/assets/Medivial_Revised.glb" hdriPath="src/assets/sunflowers_puresky_2k.exr" onPortalEnter={handleEnterPortal} />
             )}
             {currentZone === 'zone3' && (
-                <Zone3 glbPath="src/assets/Industrial_Fuller.glb" hdriPath="src/assets/evening-sky_1K_7400e4fc-d4c9-4655-b7a5-2cd52742b909.exr" onPortalEnter={handleEnterPortal} />
+                <Zone3 glbPath="src/assets/Industrial_Final.glb" hdriPath="src/assets/evening-sky_1K_7400e4fc-d4c9-4655-b7a5-2cd52742b909.exr" onPortalEnter={handleEnterPortal} />
             )}
             {currentZone === 'zone4' && (
                 <Zone4 glbPath="src/assets/Modern_Fuller.glb" hdriPath="src/assets/blue-sky-clouds_1K_3865afaa-aec2-4523-96e0-746050c54467.exr" onPortalEnter={handleEnterPortal} />

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader';
 import { gsap } from 'gsap';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import {EXRLoader} from "three/examples/jsm/loaders/EXRLoader.js";
 import { AnimationMixer } from 'three';
 
@@ -405,7 +406,13 @@ const CustomEnvironment = ({ glbPath, hdriPath, onPortalEnter }) => {
 
 
         // Load GLB model with the manager
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); // Use the CDN path
+        dracoLoader.setDecoderConfig({ type: 'js' }); // Use JavaScript decoder by default (more compatible)
+
+        // Load GLB model with Draco compression support
         const loader = new GLTFLoader(manager);
+        loader.setDRACOLoader(dracoLoader);
         loader.load(
             glbPath,
             (gltf) => {
